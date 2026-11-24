@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ludo</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 20px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: #f8fafc;
+    background: radial-gradient(circle at top, #4c1d95 0%, #1e1b4b 55%, #0f0c29 100%);
+    display: flex; flex-direction: column; align-items: center;
+  }
+  h1 { margin: 6px 0 2px; font-size: 2.6rem; letter-spacing: 4px; text-shadow: 0 4px 16px rgba(0,0,0,.4); }
+  .subtitle { opacity: .7; margin: 0 0 18px; }
+  .layout { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; align-items: flex-start; }
+  .board-wrap { background: #fff; padding: 12px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  canvas { display: block; width: min(86vw, 540px); height: auto; cursor: pointer; border-radius: 10px; }
+  .panel { width: min(88vw, 320px); display: flex; flex-direction: column; gap: 14px; }
+  .card {
+    background: rgba(255,255,255,.08); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.15); border-radius: 16px; padding: 14px;
+  }
+  .player {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 8px;
+    border-radius: 14px; background: rgba(255,255,255,.06); border: 2px solid transparent; transition: .2s;
+  }
+  .player:last-child { margin-bottom: 0; }
+  .player.active { border-color: #fff; background: rgba(255,255,255,.18); box-shadow: 0 0 18px rgba(255,255,255,.25); }
+  .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #fff; flex-shrink: 0; }
+  .pname { font-weight: 600; }
+  .done { font-size: .8rem; opacity: .8; }
+  .player select {
+    margin-left: auto; padding: 5px 8px; border-radius: 8px; border: none; font-size: .9rem; cursor: pointer;
+  }
+  .dice-area { display: flex; align-items: center; gap: 14px; }
+  .dice {
+    width: 80px; height: 80px; border-radius: 18px; background: #fff; color: #1e1b4b;
+    font-size: 58px; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 8px 20px rgba(0,0,0,.35); line-height: 1; user-select: none;
+  }
+  .dice.rolling { animation: shake .14s infinite; }
+  @keyframes shake { 0% { transform: rotate(-9deg); } 50% { transform: rotate(9deg); } 100% { transform: rotate(-9deg); } }
+  button {
+    cursor: pointer; border: none; border-radius: 12px; padding: 12px 18px; font-size: 1rem; font-weight: 700;
+    color: #1e1b4b; background: linear-gradient(135deg, #fde047, #f59e0b);
+    box-shadow: 0 6px 16px rgba(245,158,11,.4); transition: transform .1s;
+  }
+  button:hover:not(:disabled) { transform: translateY(-2px); }
+  button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+  button.secondary { background: rgba(255,255,255,.15); color: #fff; box-shadow: none; width: 100%; }
+  #status { min-height: 44px; font-size: .95rem; line-height: 1.35; margin: 12px 0; }
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none;
+    align-items: center; justify-content: center; z-index: 10; padding: 20px;
+  }
+  .overlay.show { display: flex; }
+  .modal {
+    background: #fff; color: #1e1b4b; border-radius: 24px; padding: 32px; text-align: center;
+    max-width: 360px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal h2 { margin: 0 0 8px; font-size: 2rem; }
+  .modal p { margin: 0 0 20px; }
+  footer { margin-top: 24px; opacity: .5; font-size: .85rem; }
+</style>
+</head>
+<body>
+
+<h1>🎲 LUDO</h1>
+<p class="subtitle">¡Lleva tus 4 fichas a casa antes que los demás!</p>
+
+<div class="layout">
+  <div class="board-wrap">
+    <canvas id="board" width="600" height="600"></canvas>
+  </div>
+
+  <div class="panel">
+    <div class="card" id="players"></div>
+
+    <div class="card">
+      <div class="dice-area">
+        <div id="dice" class="dice">🎲</div>
+        <button id="rollBtn">Tirar dado</button>
+      </div>
+      <p id="status"></p>
+      <button id="newBtn" class="secondary">Nueva partida</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h2 id="winTitle"></h2>
+    <p id="winText"></p>
+    <button id="playAgain">Jugar otra vez</button>
+  </div>
+</div>
+
+<footer>Hecho con ❤️ · Ludo en HTML5 Canvas</footer>
+
+<script>
+(() => {
+  const CS = 40;                       // tamaño de celda (canvas 600x600 = 15x15)
+  const COLORS = { red: '#e53935', green: '#43a047', yellow: '#fdd835', blue: '#1e88e5' };
+  const LIGHT  = { red: '#ffcdd2', green: '#c8e6c9', yellow: '#fff9c4', blue: '#bbdefb' };
+  const NAMES  = { red: 'Rojo', green: 'Verde', yellow: 'Amarillo', blue: 'Azul' };
+  const ORDER  = ['red', 'green', 'yellow', 'blue']; // sentido horario
+  const START  = { red: 1, green: 14, yellow: 27, blue: 40 };
+  const BASE   = { red: [0, 0], green: [0, 9], yellow: [9, 9], blue: [9, 0] }; // [fila, col]
+  const SLOTS  = [[1.5, 1.5], [3.5, 1.5], [1.5, 3.5], [3.5, 3.5]];
+  const DIE    = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+  const FINISH = 56;
+
+  // Camino principal de 52 casillas
+  const PATH = [
+    [6,0],[6,1],[6,2],[6,3],[6,4],[6,5],
+    [5,6],[4,6],[3,6],[2,6],[1,6],[0,6],
+    [0,7],[0,8],
+    [1,8],[2,8],[3,8],[4,8],[5,8],
+    [6,9],[6,10],[6,11],[6,12],[6,13],[6,14],
+    [7,14],
+    [8,14],[8,13],[8,12],[8,11],[8,10],[8,9],
+    [9,8],[10,8],[11,8],[12,8],[13,8],[14,8],
+    [14,7],
+    [14,6],[13,6],[12,6],[11,6],[10,6],[9,6],
+    [8,5],[8,4],[8,3],[8,2],[8,1],[8,0],
+    [7,0]
+  ];
+
+  // Columna final de cada color (5 casillas)
+  const HOME = {
+    red:    [1,2,3,4,5].map(k => [7, k]),
+    green:  [1,2,3,4,5].map(k => [k, 7]),
+    yellow: [13,12,11,10,9].map(c => [7, c]),
+    blue:   [13,12,11,10,9].map(r => [r, 7])
+  };
+
+  const SAFE = new Set([1, 14, 27, 40, 9, 22, 35, 48]);
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('board');
+  const ctx = canvas.getContext('2d');
+
+  let S = null;
+
+  // ---------- Utilidades ----------
+  const absIdx = (color, p) => (START[color] + p) % 52;
+
+  function cellOf(color, p) {
+    if (p < 0) return null;
+    if (p <= 50) return PATH[absIdx(color, p)];
+    if (p <= 55) return HOME[color][p - 51];
+    return [7, 7]; // meta
+  }
+
+  function legalFor(pl, d) {
+    const res = [];
+    pl.tokens.forEach((p, t) => {
+      if (p === -1) { if (d === 6) res.push(t); }
+      else if (p + d <= FINISH) res.push(t);
+    });
+    return res;
+  }
+
+  function moveToken(pi, t, d) {
+    const pl = S.players[pi];
+    const p = pl.tokens[t];
+    const np = p === -1 ? 0 : p + d;
+    pl.tokens[t] = np;
+    let captured = false;
+    if (np <= 50 && !SAFE.has(absIdx(pl.color, np))) {
+      const a = absIdx(pl.color, np);
+      S.players.forEach((o, oi) => {
+        if (oi === pi) return;
+        o.tokens.forEach((q, u) => {
+          if (q >= 0 && q <= 50 && absIdx(o.color, q) === a) {
+            o.tokens[u] = -1;
+            captured = true;
+          }
+        });
+      });
+    }
+    return { captured };
+  }
+
+  function tokenPositions() {
+    const res = [];
+    const groups = {};
+    S.players.forEach((pl, pi) => {
+      pl.tokens.forEach((p, t) => {
+        if (p === -1) {
+          const [r0, c0] = BASE[pl.color];
+          const [sx, sy] = SLOTS[t];
+          res.push({ pi, t, x: (c0 + sx) * CS, y: (r0 + sy) * CS });
+        } else {
+          const [r, c] = cellOf(pl.color, p);
+          const k = r + ',' + c;
+          (groups[k] = groups[k] || []).push({ pi, t });
+        }
+      });
+    });
+    for (const k in groups) {
+      const arr = groups[k];
+      const [r, c] = k.split(',').map(Number);
+      arr.forEach((o, i) => {
+        let dx = 0, dy = 0;
+        if (arr.length > 1) {
+          const ang = 2 * Math.PI * i / arr.length;
+          const rad = arr.length > 2 ? 11 : 8;
+          dx = Math.cos(ang) * rad; dy = Math.sin(ang) * rad;
+        }
+        res.push({ pi: o.pi, t: o.t, x: (c + 0.5) * CS + dx, y: (r + 0.5) * CS + dy });
+      });
+    }
+    return res;
+  }
+
+  // ---------- Dibujo ----------
+  function fillCell(r, c, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(c * CS, r * CS, CS, CS);
+  }
+
+  function strokeCell(r, c) {
+    ctx.strokeRect(c * CS + 0.5, r * CS + 0.5, CS - 1, CS - 1);
+  }
+
+  function triangle(pts, color) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0] * CS, pts[0][1] * CS);
+    pts.slice(1).forEach(([x, y]) => ctx.lineTo(x * CS, y * CS));
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  function drawBoard() {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 600, 600);
+
+    // Zonas de base
+    ORDER.forEach(col => {
+      const [r0, c0] = BASE[col];
+      ctx.fillStyle = COLORS[col];
+      ctx.fillRect(c0 * CS, r0 * CS, 6 * CS, 6 * CS);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect((c0 + 1) * CS, (r0 + 1) * CS, 4 * CS, 4 * CS);
+      ctx.fillStyle = LIGHT[col];
+      ctx.fillRect((c0 + 1.3) * CS, (r0 + 1.3) * CS, 3.4 * CS, 3.4 * CS);
+      SLOTS.forEach(([sx, sy]) => {
+        ctx.beginPath();
+        ctx.arc((c0 + sx) * CS, (r0 + sy) * CS, 16, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = COLORS[col];
+        ctx.stroke();
+      });
+    });
+
+    // Casillas de color: salida y columnas finales
+    ORDER.forEach(col => {
+      const [sr, sc] = PATH[START[col]];
+      fillCell(sr, sc, COLORS[col]);
+      HOME[col].forEach(([r, c]) => fillCell(r, c, COLORS[col]));
+    });
+
+    // Bordes del camino
+    ctx.strokeStyle = '#90a4ae';
+    ctx.lineWidth = 1;
+    PATH.forEach(([r, c]) => strokeCell(r, c));
+    ORDER.forEach(col => HOME[col].forEach(([r, c]) => strokeCell(r, c)));
+
+    // Estrellas (casillas seguras)
+    ctx.font = 'bold 20px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    SAFE.forEach(idx => {
+      if (ORDER.some(col => START[col] === idx)) return;
+      const [r, c] = PATH[idx];
+      ctx.fillStyle = '#b0bec5';
+      ctx.fillText('★', (c + 0.5) * CS, (r + 0.5) * CS + 1);
+    });
+
+    // Centro
+    const cx = 7.5 * CS, cy = 7.5 * CS;
+    triangle([[6, 6], [6, 9], [7.5, 7.5]], COLORS.red);
+    triangle([[6, 6], [9, 6], [7.5, 7.5]], COLORS.green);
+    triangle([[9, 6], [9, 9], [7.5, 7.5]], COLORS.yellow);
+    triangle([[6, 9], [9, 9], [7.5, 7.5]], COLORS.blue);
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+
+    // Borde exterior
+    ctx.strokeStyle = '#37474f';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(1.5, 1.5, 597, 597);
+  }
+
+  function drawToken(x, y, color, highlight, t) {
+    ctx.save();
+    if (highlight) {
+      const pulse = (Math.sin(performance.now() / 150) + 1) * 2;
+      ctx.beginPath();
+      ctx.arc(x, y, 21 + pulse, 0, Math.PI * 2);
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+    ctx.shadowColor = 'rgba(0,0,0,.35)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 3;
+    ctx.beginPath();
+    ctx.arc(x, y, 14, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS[color];
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x - 4, y - 5, 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function draw() {
+    drawBoard();
+    const human = S && !S.players[S.cur].cpu && S.phase === 'move';
+    tokenPositions()
+      .sort((a, b) => a.pi - b.pi)
+      .forEach(tp => {
+        const pl = S.players[tp.pi];
+        const hl = human && tp.pi === S.cur && S.legal.includes(tp.t);
+        drawToken(tp.x, tp.y, pl.color, hl, tp.t);
+      });
+  }
+
+  function loop() {
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Interfaz ----------
+  function buildPlayers() {
+    $('players').innerHTML = ORDER.map((c, i) => `
+      <div class="player" id="pl${i}">
+        <span class="dot" style="background:${COLORS[c]}"></span>
+        <span class="pname">${NAMES[c]}</span>
+        <span class="done" id="done${i}"></span>
+        <select data-i="${i}">
+          <option value="h">Humano</option>
+          <option value="c">CPU</option>
+        </select>
+      </div>`).join('');
+    document.querySelectorAll('#players select').forEach(sel => {
+      sel.value = sel.dataset.i === '0' ? 'h' : 'c';
+      sel.addEventListener('change', () => {
+        const i = +sel.dataset.i;
+        S.players[i].cpu = sel.value === 'c';
+        updateUI();
+        if (i === S.cur && !S.over) {
+          if (S.phase === 'roll' && S.players[i].cpu) setTimeout(rollDice, 500);
+          if (S.phase === 'move' && S.players[i].cpu) setTimeout(() => {
+            if (S.phase === 'move') doMove(cpuPick(S.players[i], S.legal, S.dice));
+          }, 400);
+        }
+      });
+    });
+  }
+
+  function setStatus(t) { $('status').textContent = t; }
+
+  function updateUI() {
+    ORDER.forEach((c, i) => {
+      const pl = S.players[i];
+      $('pl' + i).classList.toggle('active', i === S.cur && !S.over);
+      const n = pl.tokens.filter(p => p === FINISH).length;
+      $('done' + i).textContent = `🏁 ${n}/4`;
+    });
+    const cur = S.players[S.cur];
+    $('rollBtn').disabled = !(S.phase === 'roll' && !cur.cpu && !S.over);
+    if (S.phase === 'roll' && !S.over) {
+      $('dice').textContent = S.dice ? DIE[S.dice - 1] : '🎲';
+    }
+  }
+
+  function showWin(pl) {
+    const idx = S.players.indexOf(pl);
+    $('winTitle').textContent = `🏆 ¡Gana ${NAMES[pl.color]}!`;
+    $('winText').textContent = pl.cpu ? 'La CPU llegó primero esta vez.' : '¡Felicidades, lo lograste!';
+    $('overlay').classList.add('show');
+  }
+
+  // ---------- Lógica de turnos ----------
+  function cpuPick(pl, legal, d) {
+    let best = legal[0], bestScore = -Infinity;
+    legal.forEach(t => {
+      const p = pl.tokens[t];
+      const np = p === -1 ? 0 : p + d;
+      let s = Math.random() * 4;
+      if (np <= 50 && !SAFE.has(absIdx(pl.color, np))) {
+        const a = absIdx(pl.color, np);
+        S.players.forEach(o => {
+          if (o === pl) return;
+          o.tokens.forEach(q => {
+            if (q >= 0 && q <= 50 && absIdx(o.color, q) === a) s += 100;
+          });
+        });
+      }
+      if (p === -1) s += 50;
+      if (np === FINISH) s += 80;
+      else if (np >= 51) s += 30;
+      if (np <= 50 && SAFE.has(absIdx(pl.color, np))) s += 10;
+      s += np * 0.2;
+      if (s > bestScore) { bestScore = s; best = t; }
+    });
+    return best;
+  }
+
+  function nextTurn() {
+    S.cur = (S.cur + 1) % 4;
+    S.sixes = 0;
+    S.dice = 0;
+    S.phase = 'roll';
+    S.legal = [];
+    const cur = S.players[S.cur];
+    setStatus(`Turno de ${NAMES[cur.color]}. ${cur.cpu ? 'La CPU tira el dado...' : 'Tira el dado.'}`);
+    updateUI();
+    if (cur.cpu) setTimeout(rollDice, 700);
+  }
+
+  function rollDice() {
+    if (S.phase !== 'roll' || S.over) return;
+    S.phase = 'anim';
+    S.dice = 1 + Math.floor(Math.random() * 6);
+    const el = $('dice');
+    el.classList.add('rolling');
+    updateUI();
+    let n = 0;
+    const iv = setInterval(() => {
+      el.textContent = DIE[Math.floor(Math.random() * 6)];
+      if (++n >= 10) {
+        clearInterval(iv);
+        el.classList.remove('rolling');
+        el.textContent = DIE[S.dice - 1];
+        finishRoll();
+      }
+    }, 70);
+  }
+
+  function finishRoll() {
+    const pl = S.players[S.cur];
+    const d = S.dice;
+    S.sixes = d === 6 ? S.sixes + 1 : 0;
+
+    if (S.sixes === 3) {
+      setStatus(`${NAMES[pl.color]} sacó tres 6 seguidos y pierde el turno.`);
+      S.sixes = 0;
+      S.phase = 'anim';
+      updateUI();
+      setTimeout(nextTurn, 1200);
+      return;
+    }
+
+    const legal = legalFor(pl, d);
+    if (!legal.length) {
+      setStatus(`Sin movimientos con ${d}.`);
+      S.phase = 'anim';
+      updateUI();
+      setTimeout(nextTurn, 1100);
+      return;
+    }
+
+    S.phase = 'move';
+    S.legal = legal;
+    updateUI();
+
+    if (legal.length === 1) {
+      setStatus(pl.cpu ? 'La CPU mueve...' : 'Movimiento automático.');
+      setTimeout(() => { if (S.phase === 'move') doMove(legal[0]); }, pl.cpu ? 600 : 400);
+    } else if (pl.cpu) {
+      setStatus('La CPU elige una ficha...');
+      setTimeout(() => { if (S.phase === 'move') doMove(cpuPick(pl, legal, d)); }, 700);
+    } else {
+      setStatus('Elige una ficha resaltada en el tablero.');
+    }
+  }
+
+  function doMove(t) {
+    const pi = S.cur;
+    const pl = S.players[pi];
+    const d = S.dice;
+    S.phase = 'anim';
+    S.legal = [];
+    const { captured } = moveToken(pi, t, d);
+    updateUI();
+
+    if (pl.tokens.every(p => p === FINISH)) {
+      S.over = true;
+      updateUI();
+      showWin(pl);
+      return;
+    }
+
+    if (d === 6) {
+      setStatus(captured ? '¡Captura y seis! Tira otra vez.' : '¡Seis! Tira otra vez.');
+      S.phase = 'roll';
+      updateUI();
+      if (pl.cpu) setTimeout(rollDice, 700);
+    } else {
+      if (captured) setStatus(`¡${NAMES[pl.color]} capturó una ficha!`);
+      setTimeout(nextTurn, captured ? 900 : 350);
+    }
+  }
+
+  // ---------- Eventos ----------
+  canvas.addEventListener('click', e => {
+    if (!S || S.over || S.phase !== 'move') return;
+    const pl = S.players[S.cur];
+    if (pl.cpu) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * 600 / rect.width;
+    const y = (e.clientY - rect.top) * 600 / rect.height;
+    let best = -1, bestDist = Infinity;
+    tokenPositions().forEach(tp => {
+      if (tp.pi !== S.cur || !S.legal.includes(tp.t)) return;
+      const dist = Math.hypot(tp.x - x, tp.y - y);
+      if (dist < 24 && dist < bestDist) { bestDist = dist; best = tp.t; }
+    });
+    if (best >= 0) doMove(best);
+  });
+
+  $('rollBtn').addEventListener('click', () => {
+    if (S.phase === 'roll' && !S.players[S.cur].cpu) rollDice();
+  });
+
+  function newGame() {
+    const types = [...document.querySelectorAll('#players select')].map(s => s.value);
+    S = {
+      players: ORDER.map((c, i) => ({ color: c, cpu: types[i] === 'c', tokens: [-1, -1, -1, -1] })),
+      cur: 0,
+      dice: 0,
+      phase: 'roll',
+      sixes: 0,
+      legal: [],
+      over: false
+    };
+    $('overlay').classList.remove('show');
+    $('dice').textContent = '🎲';
+    const cur = S.players[0];
+    setStatus(`Turno de ${NAMES[cur.color]}. ${cur.cpu ? 'La CPU tira el dado...' : 'Tira el dado.'}`);
+    updateUI();
+    if (cur.cpu) setTimeout(rollDice, 700);
+  }
+
+  $('newBtn').addEventListener('click', newGame);
+  $('playAgain').addEventListener('click', newGame);
+
+  // ---------- Inicio ----------
+  buildPlayers();
+  newGame();
+  loop();
+})();
+</script>
+</body>
+</html>
